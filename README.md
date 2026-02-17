@@ -1,5 +1,7 @@
 # callonce-go
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/probablyarth/callonce-go.svg)](https://pkg.go.dev/github.com/probablyarth/callonce-go)
+
 Request-scoped call coalescing and memoization for Go.
 
 When a single HTTP request fans out into multiple goroutines that fetch the same downstream resource, `callonce` ensures the function is called **once** and the result is shared. Think `singleflight` + caching, scoped to a request lifetime via `context.Context`.
@@ -45,23 +47,25 @@ In a real app you'd call `WithCache` once at the top of your HTTP handler (or mi
 
 ## API
 
-### `WithCache(ctx context.Context) context.Context`
+```go
+// Attach a new cache to a context (typically once per request).
+func WithCache(ctx context.Context) context.Context
 
-Returns a child context carrying a new `Cache`.
+// Retrieve the cache from a context (nil if none).
+func FromContext(ctx context.Context) *Cache
 
-### `FromContext(ctx context.Context) *Cache`
+// Fetch-or-compute a value. Concurrent callers for the same key
+// share a single in-flight call and its cached result.
+func Get[T any](ctx context.Context, key string, fn func() (T, error)) (T, error)
+```
 
-Retrieves the `Cache` from the context, or `nil` if none is present.
-
-### `Get[T any](ctx context.Context, key string, fn func() (T, error)) (T, error)`
-
-Returns the value for `key`. If the value isn't cached, `fn` is called exactly once — concurrent callers for the same key block and receive the same result.
-
-- **Errors are not cached.** A failed call can be retried.
-- **`nil` values are cached.** A `(nil, nil)` result is stored.
-- **No cache in context?** `fn` is called directly (graceful degradation).
-- **Panics propagate** to all waiting callers without poisoning the cache.
-- **Same key = same type.** Using the same key with different type parameters is unsupported.
+| Behaviour | Detail |
+|-----------|--------|
+| Errors | Not cached — a failed call can be retried |
+| `nil` values | Cached — a `(nil, nil)` result is stored |
+| No cache in context | `fn` is called directly (graceful degradation) |
+| Panics | Propagate to all waiters without poisoning the cache |
+| Type safety | Same key must always use the same type `T` |
 
 ## Benchmarks
 
