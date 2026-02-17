@@ -183,6 +183,16 @@ callonce shines when keys repeat. The cache eliminates redundant `Do()` calls en
 go test -bench=. -benchmem ./...
 ```
 
+## Please Consider Giving the Repo a Star ⭐
+
+<a href="https://github.com/probablyarth/callonce-go">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=probablyarth/callonce-go&type=Timeline&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=probablyarth/callonce-go&type=Timeline" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=probablyarth/callonce-go&type=Timeline" />
+  </picture>
+</a>
+
 ## License
 
 Apache-2.0
