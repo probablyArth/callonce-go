@@ -12,6 +12,8 @@ import (
 
 var fetchCount atomic.Int32
 
+var userKey = callonce.NewKey[string]("user")
+
 func fetchUser(id string) func() (string, error) {
 	return func() (string, error) {
 		n := fetchCount.Add(1)
@@ -35,8 +37,8 @@ func main() {
 		id := c.Params("id")
 
 		// Both calls share the same cache — fetchUser runs once.
-		user1, _ := callonce.Get(ctx, "user:"+id, fetchUser(id))
-		user2, _ := callonce.Get(ctx, "user:"+id, fetchUser(id))
+		user1, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
+		user2, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
 
 		return c.JSON(fiber.Map{
 			"first_call":  user1,

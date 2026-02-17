@@ -11,6 +11,8 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+var benchKey = callonce.NewKey[string]("bench")
+
 // ---------------------------------------------------------------------------
 // Single-goroutine benchmarks — measure per-call latency.
 // ---------------------------------------------------------------------------
@@ -18,27 +20,27 @@ import (
 // How fast is a cache hit (RLock + map lookup)?
 func BenchmarkCacheHit(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
-	callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+	callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 	}
 }
 
 // How fast is a cache miss (singleflight + write)?
 func BenchmarkCacheMiss(b *testing.B) {
-	keys := make([]string, b.N)
-	for i := range keys {
-		keys[i] = fmt.Sprintf("k-%d", i)
+	ids := make([]string, b.N)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%d", i)
 	}
 
 	ctx := callonce.WithCache(context.Background())
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, keys[i], func() (string, error) { return "v", nil })
+		callonce.Get(ctx, benchKey, ids[i], func() (string, error) { return "v", nil })
 	}
 }
 
@@ -47,7 +49,7 @@ func BenchmarkNoCache(b *testing.B) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 	}
 }
 
@@ -58,7 +60,7 @@ func BenchmarkErrorNotCached(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, "k", func() (string, error) { return "", fail })
+		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "", fail })
 	}
 }
 
@@ -77,7 +79,7 @@ func BenchmarkConcurrent_SameKey(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func() {
 				defer wg.Done()
-				callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+				callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 			}()
 		}
 		wg.Wait()
@@ -86,9 +88,9 @@ func BenchmarkConcurrent_SameKey(b *testing.B) {
 
 // 1000 goroutines each requesting a unique key — no dedup, pure write contention.
 func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
-	keys := make([]string, 1000)
-	for i := range keys {
-		keys[i] = fmt.Sprintf("key-%d", i)
+	ids := make([]string, 1000)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%d", i)
 	}
 
 	b.ReportAllocs()
@@ -99,7 +101,7 @@ func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[j], func() (string, error) { return "v", nil })
+				callonce.Get(ctx, benchKey, ids[j], func() (string, error) { return "v", nil })
 			}(j)
 		}
 		wg.Wait()
@@ -108,9 +110,9 @@ func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
 
 // 1000 goroutines sharing 100 keys — realistic mix of hits and dedup.
 func BenchmarkConcurrent_MixedKeys(b *testing.B) {
-	keys := make([]string, 100)
-	for i := range keys {
-		keys[i] = fmt.Sprintf("key-%d", i)
+	ids := make([]string, 100)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%d", i)
 	}
 
 	b.ReportAllocs()
@@ -121,7 +123,7 @@ func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[j%100], func() (string, error) { return "v", nil })
+				callonce.Get(ctx, benchKey, ids[j%100], func() (string, error) { return "v", nil })
 			}(j)
 		}
 		wg.Wait()
@@ -131,13 +133,13 @@ func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 // b.RunParallel — cache hit under true parallel reader contention.
 func BenchmarkParallel_CacheHit(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
-	callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+	callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			callonce.Get(ctx, "k", func() (string, error) { return "v", nil })
+			callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
 		}
 	})
 }
