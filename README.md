@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/probablyarth/callonce-go.svg)](https://pkg.go.dev/github.com/probablyarth/callonce-go)
 [![Go Report Card](https://goreportcard.com/badge/github.com/probablyarth/callonce-go)](https://goreportcard.com/report/github.com/probablyarth/callonce-go)
 
-Request-scoped call coalescing and memoization for Go.
+Request-scoped deduplication and memoization for Go.
 
 ## The problem
 
