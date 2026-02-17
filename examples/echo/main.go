@@ -39,7 +39,7 @@ func main() {
 		ctx := c.Request().Context()
 		id := c.Param("id")
 
-		// Both calls share the same cache — fetchUser runs once.
+		// Both calls share the same cache, so fetchUser runs once.
 		user1, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
 		user2, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
 

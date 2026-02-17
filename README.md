@@ -7,11 +7,11 @@ Request-scoped call coalescing and memoization for Go.
 
 ## The problem
 
-A single HTTP request often fans out into multiple goroutines — middleware, service layers, template rendering — that independently call the same downstream resource. Without coordination:
+A single HTTP request often fans out into multiple goroutines (middleware, service layers, template rendering) that independently call the same downstream resource. Without coordination:
 
-- **Redundant calls** — the same database query or API call runs 3-5x per request.
-- **Wasted resources** — each duplicate call consumes a connection, adds latency, and increases load on downstream services.
-- **singleflight alone isn't enough** — it deduplicates *in-flight* calls, but once a call completes, the next caller triggers it all over again. There's no caching.
+- **Redundant calls.** The same database query or API call runs 3-5x per request.
+- **Wasted resources.** Each duplicate call consumes a connection, adds latency, and increases load on downstream services.
+- **singleflight alone isn't enough.** It deduplicates *in-flight* calls, but once a call completes, the next caller triggers it all over again. There's no caching.
 
 ## The solution
 
@@ -54,7 +54,7 @@ func main() {
 	user, _ := callonce.Get(ctx, userKey, "1", fetchUser)
 	fmt.Println(user) // alice
 
-	// Second call returns the cached result — fetchUser is not called again.
+	// Second call returns the cached result. fetchUser is not called again.
 	user, _ = callonce.Get(ctx, userKey, "1", fetchUser)
 	fmt.Println(user) // alice
 }
@@ -83,7 +83,7 @@ func Get[T any](ctx context.Context, key Key[T], identifier string, fn func() (T
 
 ### Typed keys with `Key[T]`
 
-Cache keys are created with `NewKey[T]`, which encodes the Go type into the underlying key string. This means `NewKey[string]("user")` and `NewKey[int]("user")` produce different cache slots — **type collisions are impossible**. The compiler enforces that the function passed to `Get` returns the type matching the key.
+Cache keys are created with `NewKey[T]`, which encodes the Go type into the underlying key string. This means `NewKey[string]("user")` and `NewKey[int]("user")` produce different cache slots, so **type collisions are impossible**. The compiler enforces that the function passed to `Get` returns the type matching the key.
 
 ```go
 var userKey  = callonce.NewKey[*User]("user")   // Key[*User]
@@ -94,13 +94,13 @@ var countKey = callonce.NewKey[int]("count")     // Key[int]
 
 ### Declare keys once, not in hot paths
 
-`NewKey[T]` uses `fmt.Sprintf` and reflection internally to encode the type name into the key string. This is intentional — it's what prevents type collisions — but it means each call allocates. Declare keys as package-level variables so the cost is paid once at init, not on every request:
+`NewKey[T]` uses `fmt.Sprintf` and reflection internally to encode the type name into the key string. This is what prevents type collisions, but it means each call allocates. Declare keys as package-level variables so the cost is paid once at init, not on every request:
 
 ```go
-// Good — created once at startup.
+// Good: created once at startup.
 var userKey = callonce.NewKey[*User]("user")
 
-// Bad — allocates on every call to the handler.
+// Bad: allocates on every call to the handler.
 func handler(w http.ResponseWriter, r *http.Request) {
     key := callonce.NewKey[*User]("user") // unnecessary allocation
     ...
@@ -124,7 +124,7 @@ A failed call doesn't poison the cache. The next caller retries the function, wh
 
 ### Graceful degradation
 
-If `WithCache` was never called (no cache in context), `Get` calls the function directly and returns the result. No panic, no error — your code works with or without the cache.
+If `WithCache` was never called (no cache in context), `Get` calls the function directly and returns the result. No panic, no error. Your code works with or without the cache.
 
 ### No TTLs or eviction
 
@@ -138,8 +138,8 @@ If the function panics, the panic propagates to all waiting goroutines (via sing
 
 | Behaviour | Detail |
 |-----------|--------|
-| Errors | Not cached — a failed call can be retried |
-| `nil` values | Cached — a `(nil, nil)` result is stored |
+| Errors | Not cached; a failed call can be retried |
+| `nil` values | Cached; a `(nil, nil)` result is stored |
 | No cache in context | `fn` is called directly (graceful degradation) |
 | Panics | Propagate to all waiters without poisoning the cache |
 | Type safety | Enforced at compile time via `Key[T]` |
@@ -169,7 +169,7 @@ Cache hits resolve in **~24 ns** with a single allocation (the key concatenation
 
 ### callonce vs raw singleflight
 
-Same 1 000-goroutine scenarios — singleflight deduplicates in-flight calls but **does not cache results**, so every iteration goes through `Do()` again.
+Same 1 000-goroutine scenarios. Singleflight deduplicates in-flight calls but **does not cache results**, so every iteration goes through `Do()` again.
 
 | Scenario | callonce | singleflight | speedup |
 |----------|------:|------:|:------:|
@@ -177,7 +177,7 @@ Same 1 000-goroutine scenarios — singleflight deduplicates in-flight calls but
 | Mixed keys | 836 µs | 636 µs | 0.8x |
 | Unique keys | 1 904 µs | 611 µs | 0.3x |
 
-callonce shines when keys repeat — the cache eliminates redundant `Do()` calls entirely. With mostly-unique keys the caching overhead (map writes, locks) costs more than it saves; in that scenario raw singleflight is leaner.
+callonce shines when keys repeat. The cache eliminates redundant `Do()` calls entirely. With mostly-unique keys the caching overhead (map writes, locks) costs more than it saves; in that scenario raw singleflight is leaner.
 
 ```
 go test -bench=. -benchmem ./...

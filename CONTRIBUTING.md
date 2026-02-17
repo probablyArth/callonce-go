@@ -13,8 +13,8 @@ go test -race -v ./...
 
 ## Making changes
 
-- Keep changes focused — one feature or fix per PR.
-- Format your code with `gofmt` (or `goimports`).
+- Keep changes focused. One feature or fix per PR.
+- Format your code with `gofmt`
 - Run `go vet ./...` before committing.
 - Add or update tests for any new behaviour.
 

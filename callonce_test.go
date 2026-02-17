@@ -102,7 +102,7 @@ func TestGetErrorNotCached(t *testing.T) {
 		t.Fatalf("got err=%v, want %v", err, errBoom)
 	}
 
-	// Second call: success — fn must be invoked again.
+	// Second call: success, fn must be invoked again.
 	val, err := callonce.Get(ctx, testKey, "1", func() (string, error) {
 		calls.Add(1)
 		return "ok", nil
@@ -138,7 +138,7 @@ func TestGetPanicPropagates(t *testing.T) {
 		})
 	}()
 
-	// Cache should not be poisoned — a subsequent call with the same key succeeds.
+	// Cache should not be poisoned. A subsequent call with the same key succeeds.
 	val, err := callonce.Get(ctx, testKey, "1", func() (string, error) {
 		return "recovered", nil
 	})

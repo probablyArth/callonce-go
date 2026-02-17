@@ -14,7 +14,7 @@ import (
 var benchKey = callonce.NewKey[string]("bench")
 
 // ---------------------------------------------------------------------------
-// Single-goroutine benchmarks — measure per-call latency.
+// Single-goroutine benchmarks: measure per-call latency.
 // ---------------------------------------------------------------------------
 
 // How fast is a cache hit (RLock + map lookup)?
@@ -53,7 +53,7 @@ func BenchmarkNoCache(b *testing.B) {
 	}
 }
 
-// Errors are not cached — measure the retry path.
+// Errors are not cached. Measure the retry path.
 func BenchmarkErrorNotCached(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
 	fail := errors.New("fail")
@@ -65,7 +65,7 @@ func BenchmarkErrorNotCached(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// Concurrent benchmarks — measure throughput under contention.
+// Concurrent benchmarks: measure throughput under contention.
 // ---------------------------------------------------------------------------
 
 // 1000 goroutines all requesting the same key.
@@ -86,7 +86,7 @@ func BenchmarkConcurrent_SameKey(b *testing.B) {
 	}
 }
 
-// 1000 goroutines each requesting a unique key — no dedup, pure write contention.
+// 1000 goroutines each requesting a unique key. No dedup, pure write contention.
 func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
 	ids := make([]string, 1000)
 	for i := range ids {
@@ -108,7 +108,7 @@ func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
 	}
 }
 
-// 1000 goroutines sharing 100 keys — realistic mix of hits and dedup.
+// 1000 goroutines sharing 100 keys. Realistic mix of hits and dedup.
 func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 	ids := make([]string, 100)
 	for i := range ids {
@@ -130,7 +130,7 @@ func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 	}
 }
 
-// b.RunParallel — cache hit under true parallel reader contention.
+// b.RunParallel: cache hit under true parallel reader contention.
 func BenchmarkParallel_CacheHit(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
 	callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
@@ -145,11 +145,11 @@ func BenchmarkParallel_CacheHit(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// Singleflight comparison — same scenarios, raw singleflight (no caching).
+// Singleflight comparison: same scenarios, raw singleflight (no caching).
 // ---------------------------------------------------------------------------
 
 // singleflight alone: 1000 goroutines, same key.
-// Result is NOT cached — every iteration goes through Do() again.
+// Result is NOT cached, so every iteration goes through Do() again.
 func BenchmarkSingleflight_SameKey(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -166,7 +166,7 @@ func BenchmarkSingleflight_SameKey(b *testing.B) {
 	}
 }
 
-// singleflight alone: 1000 goroutines, unique keys — no dedup benefit.
+// singleflight alone: 1000 goroutines, unique keys. No dedup benefit.
 func BenchmarkSingleflight_UniqueKeys(b *testing.B) {
 	keys := make([]string, 1000)
 	for i := range keys {
@@ -188,7 +188,7 @@ func BenchmarkSingleflight_UniqueKeys(b *testing.B) {
 	}
 }
 
-// singleflight alone: 1000 goroutines, 100 keys — partial dedup.
+// singleflight alone: 1000 goroutines, 100 keys. Partial dedup.
 func BenchmarkSingleflight_MixedKeys(b *testing.B) {
 	keys := make([]string, 100)
 	for i := range keys {
