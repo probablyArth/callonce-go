@@ -78,4 +78,4 @@ Cache hits are ~9ns with zero allocations. The no-cache fallback path adds ~2ns 
 
 ## License
 
-MIT
+Apache-2.0
