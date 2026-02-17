@@ -70,16 +70,44 @@ func Get[T any](ctx context.Context, key string, fn func() (T, error)) (T, error
 
 ## Benchmarks
 
-```
-BenchmarkGet_CacheHit-14             138195949       8.620 ns/op      0 B/op    0 allocs/op
-BenchmarkGet_NoCache-14              539415440       2.268 ns/op      0 B/op    0 allocs/op
-BenchmarkGet_SameKey_1000-14             5181      231213 ns/op   33027 B/op  1010 allocs/op
-BenchmarkGet_MixedWorkload-14            1531      786255 ns/op  120408 B/op  2377 allocs/op
-BenchmarkGet_UniqueKeys_1000-14           685     1784373 ns/op  468797 B/op  5143 allocs/op
-BenchmarkSingleflight_Baseline-14        1954      627942 ns/op   42605 B/op  1231 allocs/op
-```
+> Apple M4 Pro · Go 1.24 · `go test -bench=. -benchmem`
 
-Cache hits are ~9ns with zero allocations. The no-cache fallback path adds ~2ns of overhead.
+### Per-call latency
+
+| Scenario | ns/op | B/op | allocs/op |
+|----------|------:|-----:|----------:|
+| Cache hit | **8.7** | 0 | 0 |
+| Cache miss (first call) | 370 | 280 | 3 |
+| No cache in context | 2.3 | 0 | 0 |
+| Error (not cached) | 63 | 80 | 1 |
+
+Cache hits resolve in **~9 ns** with **zero allocations** — just a read-lock and a map lookup.
+
+### Concurrent throughput (1 000 goroutines)
+
+| Scenario | µs/op | B/op | allocs/op |
+|----------|------:|-----:|----------:|
+| Same key (max dedup) | **239** | 33 k | 1 010 |
+| Mixed keys (100 keys) | 815 | 120 k | 2 370 |
+| Unique keys (no dedup) | 1 786 | 471 k | 5 149 |
+
+### callonce vs raw singleflight
+
+Same 1 000-goroutine scenarios — singleflight deduplicates in-flight calls but **does not cache results**, so every iteration goes through `Do()` again.
+
+| Scenario | callonce | singleflight | speedup |
+|----------|------:|------:|:------:|
+| Same key | 239 µs | 666 µs | **2.8x** |
+| Mixed keys | 815 µs | 610 µs | 0.7x |
+| Unique keys | 1 786 µs | 604 µs | 0.3x |
+
+callonce shines when keys repeat — the cache eliminates redundant `Do()` calls entirely. With mostly-unique keys the caching overhead (map writes, locks) costs more than it saves; in that scenario raw singleflight is leaner.
+
+Run the benchmarks yourself:
+
+```
+go test -bench=. -benchmem ./...
+```
 
 ## License
 
