@@ -9,12 +9,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/probablyarth/callonce-go"
+	callonce "github.com/probablyarth/callonce-go"
 )
 
 func TestGetWithoutCache(t *testing.T) {
 	ctx := context.Background()
-	val, err := callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+	val, err := callonce.Get(ctx, "k", func() (string, error) {
 		return "direct", nil
 	})
 	if err != nil {
@@ -29,7 +29,7 @@ func TestGetCachesResult(t *testing.T) {
 	ctx := callonce.WithCache(context.Background())
 	var calls atomic.Int32
 
-	fn := func(ctx context.Context) (string, error) {
+	fn := func() (string, error) {
 		calls.Add(1)
 		return "cached", nil
 	}
@@ -65,7 +65,7 @@ func TestGetConcurrentDedup(t *testing.T) {
 	for i := range n {
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+			results[i], errs[i] = callonce.Get(ctx, "k", func() (string, error) {
 				calls.Add(1)
 				return "deduped", nil
 			})
@@ -92,7 +92,7 @@ func TestGetErrorNotCached(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	// First call: error.
-	_, err := callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+	_, err := callonce.Get(ctx, "k", func() (string, error) {
 		calls.Add(1)
 		return "", errBoom
 	})
@@ -101,7 +101,7 @@ func TestGetErrorNotCached(t *testing.T) {
 	}
 
 	// Second call: success — fn must be invoked again.
-	val, err := callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+	val, err := callonce.Get(ctx, "k", func() (string, error) {
 		calls.Add(1)
 		return "ok", nil
 	})
@@ -131,13 +131,13 @@ func TestGetPanicPropagates(t *testing.T) {
 				t.Fatalf("got panic %v, want it to contain %q", r, "kaboom")
 			}
 		}()
-		callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+		callonce.Get(ctx, "k", func() (string, error) {
 			panic("kaboom")
 		})
 	}()
 
 	// Cache should not be poisoned — a subsequent call with the same key succeeds.
-	val, err := callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+	val, err := callonce.Get(ctx, "k", func() (string, error) {
 		return "recovered", nil
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestGetNilValueCached(t *testing.T) {
 
 	type S struct{ Name string }
 
-	fn := func(ctx context.Context) (*S, error) {
+	fn := func() (*S, error) {
 		calls.Add(1)
 		return nil, nil
 	}
@@ -180,7 +180,7 @@ func TestGetDifferentKeys(t *testing.T) {
 	ctx := callonce.WithCache(context.Background())
 	var callsA, callsB atomic.Int32
 
-	va, err := callonce.Get(ctx, "a", func(ctx context.Context) (string, error) {
+	va, err := callonce.Get(ctx, "a", func() (string, error) {
 		callsA.Add(1)
 		return "alpha", nil
 	})
@@ -188,7 +188,7 @@ func TestGetDifferentKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	vb, err := callonce.Get(ctx, "b", func(ctx context.Context) (string, error) {
+	vb, err := callonce.Get(ctx, "b", func() (string, error) {
 		callsB.Add(1)
 		return "beta", nil
 	})
@@ -220,14 +220,14 @@ func TestWithCacheFromContext(t *testing.T) {
 func TestGetDifferentTypes(t *testing.T) {
 	ctx := callonce.WithCache(context.Background())
 
-	vs, err := callonce.Get(ctx, "str", func(ctx context.Context) (string, error) {
+	vs, err := callonce.Get(ctx, "str", func() (string, error) {
 		return "hello", nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	vi, err := callonce.Get(ctx, "int", func(ctx context.Context) (int, error) {
+	vi, err := callonce.Get(ctx, "int", func() (int, error) {
 		return 42, nil
 	})
 	if err != nil {

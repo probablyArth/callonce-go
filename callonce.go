@@ -37,10 +37,10 @@ func FromContext(ctx context.Context) *Cache {
 // If ctx has no Cache (WithCache was not called), fn is called directly.
 //
 // The same key must always be used with the same type T.
-func Get[T any](ctx context.Context, key string, fn func(ctx context.Context) (T, error)) (T, error) {
+func Get[T any](ctx context.Context, key string, fn func() (T, error)) (T, error) {
 	c := FromContext(ctx)
 	if c == nil {
-		return fn(ctx)
+		return fn()
 	}
 
 	// Fast path: already cached.
@@ -61,7 +61,7 @@ func Get[T any](ctx context.Context, key string, fn func(ctx context.Context) (T
 		}
 		c.mu.RUnlock()
 
-		result, err := fn(ctx)
+		result, err := fn()
 		if err != nil {
 			return result, err
 		}

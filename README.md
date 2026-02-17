@@ -22,7 +22,7 @@ import (
 	callonce "github.com/probablyarth/callonce-go"
 )
 
-func fetchUser(ctx context.Context) (string, error) {
+func fetchUser() (string, error) {
 	fmt.Println("calling downstream")
 	return "alice", nil
 }
@@ -53,7 +53,7 @@ Returns a child context carrying a new `Cache`.
 
 Retrieves the `Cache` from the context, or `nil` if none is present.
 
-### `Get[T any](ctx context.Context, key string, fn func(ctx context.Context) (T, error)) (T, error)`
+### `Get[T any](ctx context.Context, key string, fn func() (T, error)) (T, error)`
 
 Returns the value for `key`. If the value isn't cached, `fn` is called exactly once — concurrent callers for the same key block and receive the same result.
 

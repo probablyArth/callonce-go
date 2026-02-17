@@ -19,7 +19,7 @@ func BenchmarkGet_SameKey_1000(b *testing.B) {
 		for range 1000 {
 			go func() {
 				defer wg.Done()
-				callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+				callonce.Get(ctx, "k", func() (string, error) {
 					return "v", nil
 				})
 			}()
@@ -41,7 +41,7 @@ func BenchmarkGet_UniqueKeys_1000(b *testing.B) {
 		for i := range 1000 {
 			go func(i int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[i], func(ctx context.Context) (string, error) {
+				callonce.Get(ctx, keys[i], func() (string, error) {
 					return "v", nil
 				})
 			}(i)
@@ -63,7 +63,7 @@ func BenchmarkGet_MixedWorkload(b *testing.B) {
 		for i := range 1000 {
 			go func(i int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[i%100], func(ctx context.Context) (string, error) {
+				callonce.Get(ctx, keys[i%100], func() (string, error) {
 					return "v", nil
 				})
 			}(i)
@@ -76,11 +76,11 @@ func BenchmarkGet_CacheHit(b *testing.B) {
 	b.ReportAllocs()
 	ctx := callonce.WithCache(context.Background())
 	// Pre-populate.
-	callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+	callonce.Get(ctx, "k", func() (string, error) {
 		return "v", nil
 	})
 	for b.Loop() {
-		callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+		callonce.Get(ctx, "k", func() (string, error) {
 			return "v", nil
 		})
 	}
@@ -108,7 +108,7 @@ func BenchmarkGet_NoCache(b *testing.B) {
 	b.ReportAllocs()
 	ctx := context.Background()
 	for b.Loop() {
-		callonce.Get(ctx, "k", func(ctx context.Context) (string, error) {
+		callonce.Get(ctx, "k", func() (string, error) {
 			return "v", nil
 		})
 	}
