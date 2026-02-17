@@ -12,11 +12,11 @@ import (
 
 func BenchmarkGet_SameKey_1000(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		ctx := callonce.WithCache(context.Background())
 		var wg sync.WaitGroup
 		wg.Add(1000)
-		for range 1000 {
+		for j := 0; j < 1000; j++ {
 			go func() {
 				defer wg.Done()
 				callonce.Get(ctx, "k", func() (string, error) {
@@ -34,17 +34,17 @@ func BenchmarkGet_UniqueKeys_1000(b *testing.B) {
 	for i := range keys {
 		keys[i] = fmt.Sprintf("key-%d", i)
 	}
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		ctx := callonce.WithCache(context.Background())
 		var wg sync.WaitGroup
 		wg.Add(1000)
-		for i := range 1000 {
-			go func(i int) {
+		for j := 0; j < 1000; j++ {
+			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[i], func() (string, error) {
+				callonce.Get(ctx, keys[j], func() (string, error) {
 					return "v", nil
 				})
-			}(i)
+			}(j)
 		}
 		wg.Wait()
 	}
@@ -56,17 +56,17 @@ func BenchmarkGet_MixedWorkload(b *testing.B) {
 	for i := range keys {
 		keys[i] = fmt.Sprintf("key-%d", i)
 	}
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		ctx := callonce.WithCache(context.Background())
 		var wg sync.WaitGroup
 		wg.Add(1000)
-		for i := range 1000 {
-			go func(i int) {
+		for j := 0; j < 1000; j++ {
+			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, keys[i%100], func() (string, error) {
+				callonce.Get(ctx, keys[j%100], func() (string, error) {
 					return "v", nil
 				})
-			}(i)
+			}(j)
 		}
 		wg.Wait()
 	}
@@ -79,7 +79,7 @@ func BenchmarkGet_CacheHit(b *testing.B) {
 	callonce.Get(ctx, "k", func() (string, error) {
 		return "v", nil
 	})
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		callonce.Get(ctx, "k", func() (string, error) {
 			return "v", nil
 		})
@@ -88,11 +88,11 @@ func BenchmarkGet_CacheHit(b *testing.B) {
 
 func BenchmarkSingleflight_Baseline(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		var g singleflight.Group
 		var wg sync.WaitGroup
 		wg.Add(1000)
-		for range 1000 {
+		for j := 0; j < 1000; j++ {
 			go func() {
 				defer wg.Done()
 				g.Do("k", func() (any, error) {
@@ -107,7 +107,7 @@ func BenchmarkSingleflight_Baseline(b *testing.B) {
 func BenchmarkGet_NoCache(b *testing.B) {
 	b.ReportAllocs()
 	ctx := context.Background()
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		callonce.Get(ctx, "k", func() (string, error) {
 			return "v", nil
 		})
