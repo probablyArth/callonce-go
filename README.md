@@ -19,7 +19,7 @@ A single HTTP request often fans out into multiple goroutines (middleware, servi
 
 1. **First caller** for a key triggers the function and caches the result.
 2. **Concurrent callers** for the same key share the in-flight call (singleflight).
-3. **Subsequent callers** get the cached result instantly (~9 ns, zero allocations).
+3. **Subsequent callers** get the cached result instantly (~26 ns, one allocation).
 4. **When the request ends**, the context (and cache) is garbage collected. No TTLs, no eviction, no stale data.
 
 ## Install
@@ -37,7 +37,7 @@ import (
 	"context"
 	"fmt"
 
-	callonce "github.com/probablyarth/callonce-go"
+	"github.com/probablyarth/callonce-go"
 )
 
 var userKey = callonce.NewKey[string]("user")
@@ -51,11 +51,11 @@ func main() {
 	ctx := callonce.WithCache(context.Background())
 
 	// First call executes fetchUser.
-	user, _ := callonce.Get(ctx, userKey, "1", fetchUser)
+	user, _ := callonce.Get(ctx, fetchUser, callonce.L(userKey, "1"))
 	fmt.Println(user) // alice
 
 	// Second call returns the cached result. fetchUser is not called again.
-	user, _ = callonce.Get(ctx, userKey, "1", fetchUser)
+	user, _ = callonce.Get(ctx, fetchUser, callonce.L(userKey, "1"))
 	fmt.Println(user) // alice
 }
 ```
@@ -68,15 +68,19 @@ In a real app, call `WithCache` once in middleware and pass the context down.
 // Create a typed cache key (typically a package-level var).
 func NewKey[T any](name string) Key[T]
 
+// Create a Lookup pairing a key with an identifier.
+func L[T any](key Key[T], identifier string) Lookup[T]
+
 // Attach a new cache to a context (typically once per request).
 func WithCache(ctx context.Context) context.Context
 
 // Retrieve the cache from a context (nil if none).
 func FromContext(ctx context.Context) *Cache
 
-// Fetch-or-compute a value. Concurrent callers for the same key + identifier
-// share a single in-flight call and its cached result.
-func Get[T any](ctx context.Context, key Key[T], identifier string, fn func() (T, error)) (T, error)
+// Fetch-or-compute a value. Pass one or more lookups; a cache hit on any
+// lookup returns immediately (OR semantics). On a miss, fn runs once and
+// the result is cached under every lookup key.
+func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T]) (T, error)
 ```
 
 ## Design decisions
@@ -107,15 +111,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### Key + identifier separation
+### Lookups: key + identifier separation
 
-The `Key[T]` represents the *category* (e.g. "user"), while the `identifier` string represents the *instance* (e.g. the user ID). This keeps key declarations static and reusable:
+A `Lookup[T]` pairs a `Key[T]` (*category*, e.g. "user") with an `identifier` string (*instance*, e.g. the user ID). The `L()` helper creates one:
 
 ```go
 var userKey = callonce.NewKey[*User]("user")
 
 // In a handler:
-callonce.Get(ctx, userKey, userID, fetchUser)
+callonce.Get(ctx, fetchUser, callonce.L(userKey, userID))
+```
+
+### Multi-lookup OR semantics
+
+A resource is often addressable by more than one identifier — an ID, a slug, an email, etc. Different code paths may look up the same resource by different identifiers, causing redundant calls even with caching.
+
+Pass multiple lookups to `Get` and it applies **OR semantics**: a cache hit on *any* lookup returns immediately, and on a miss the result is stored under *every* lookup key. This means a fetch-by-slug automatically seeds the by-ID cache entry and vice versa.
+
+```go
+var byID   = callonce.NewKey[*User]("user-by-id")
+var bySlug = callonce.NewKey[*User]("user-by-slug")
+
+// One call, two cache entries. Future lookups by either identifier hit cache.
+user, err := callonce.Get(ctx, fetchUser,
+    callonce.L(byID, "42"),
+    callonce.L(bySlug, "alice"),
+)
 ```
 
 ### Errors are not cached
@@ -143,44 +164,45 @@ If the function panics, the panic propagates to all waiting goroutines (via sing
 | No cache in context | `fn` is called directly (graceful degradation) |
 | Panics | Propagate to all waiters without poisoning the cache |
 | Type safety | Enforced at compile time via `Key[T]` |
+| Multiple lookups | OR semantics; hit on any key, result stored under all |
 
 ## Benchmarks
 
-> Apple M4 Pro · Go 1.24 · `go test -bench=. -benchmem`
+> Apple M4 Pro · Go 1.25 · `go test -bench=. -benchmem -count=10` analyzed with [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
 
 ### Per-call latency
 
 | Scenario | ns/op | B/op | allocs/op |
 |----------|------:|-----:|----------:|
-| Cache hit | **24.4** ± 3% | 16 | 1 |
-| Cache miss (first call) | 365 ± 5% | 303 | 4 |
-| No cache in context | 2.5 ± 1% | 0 | 0 |
-| Error (not cached) | 83.5 ± 1% | 96 | 2 |
+| Cache hit | **26.11** ± 1% | 16 | 1 |
+| Cache miss (first call) | 358.8 ± 10% | 254 | 4 |
+| No cache in context | 2.53 ± 1% | 0 | 0 |
+| Error (not cached) | 82.36 ± 1% | 96 | 2 |
 
-Cache hits resolve in **~24 ns** with a single allocation (the key concatenation). The no-cache fallback path adds only ~2.5 ns.
+Cache hits resolve in **~26 ns** with a single allocation (the key concatenation). The no-cache fallback path adds only ~2.5 ns.
 
-### Concurrent throughput (1 000 goroutines)
+### Concurrent throughput (1,000 goroutines)
 
 | Scenario | µs/op | B/op | allocs/op |
 |----------|------:|-----:|----------:|
-| Same key (max dedup) | **235** ± 1% | 49 k | 2 010 |
-| Mixed keys (100 keys) | 836 ± 1% | 132 k | 3 365 |
-| Unique keys (no dedup) | 1 904 ± 1% | 481 k | 6 190 |
+| Same key (max dedup) | **262** ± 7% | 49 k | 2,010 |
+| Mixed keys (100 keys) | 882 ± 7% | 133 k | 3,370 |
+| Unique keys (no dedup) | 1,986 ± 1% | 483 k | 6,197 |
 
 ### callonce vs raw singleflight
 
-Same 1 000-goroutine scenarios. Singleflight deduplicates in-flight calls but **does not cache results**, so every iteration goes through `Do()` again.
+Same 1,000-goroutine scenarios. Singleflight deduplicates in-flight calls but **does not cache results**, so every iteration goes through `Do()` again.
 
 | Scenario | callonce | singleflight | speedup |
 |----------|------:|------:|:------:|
-| Same key | 235 µs | 682 µs | **2.9x** |
-| Mixed keys | 836 µs | 636 µs | 0.8x |
-| Unique keys | 1 904 µs | 611 µs | 0.3x |
+| Same key | 262 µs | 633 µs | **2.4x** |
+| Mixed keys | 882 µs | 635 µs | 0.7x |
+| Unique keys | 1,986 µs | 606 µs | 0.3x |
 
 callonce shines when keys repeat. The cache eliminates redundant `Do()` calls entirely. With mostly-unique keys the caching overhead (map writes, locks) costs more than it saves; in that scenario raw singleflight is leaner.
 
 ```
-go test -bench=. -benchmem ./...
+go test -bench=. -benchmem -count=10 ./...
 ```
 
 ## Please Consider Giving the Repo a Star ⭐

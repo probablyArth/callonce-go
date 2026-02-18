@@ -20,12 +20,12 @@ var benchKey = callonce.NewKey[string]("bench")
 // How fast is a cache hit (RLock + map lookup)?
 func BenchmarkCacheHit(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
-	callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+	callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+		callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 	}
 }
 
@@ -40,7 +40,7 @@ func BenchmarkCacheMiss(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, benchKey, ids[i], func() (string, error) { return "v", nil })
+		callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, ids[i]))
 	}
 }
 
@@ -49,7 +49,7 @@ func BenchmarkNoCache(b *testing.B) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+		callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 	}
 }
 
@@ -60,7 +60,7 @@ func BenchmarkErrorNotCached(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		callonce.Get(ctx, benchKey, "1", func() (string, error) { return "", fail })
+		callonce.Get(ctx, func() (string, error) { return "", fail }, callonce.L(benchKey, "1"))
 	}
 }
 
@@ -79,7 +79,7 @@ func BenchmarkConcurrent_SameKey(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func() {
 				defer wg.Done()
-				callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+				callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 			}()
 		}
 		wg.Wait()
@@ -101,7 +101,7 @@ func BenchmarkConcurrent_UniqueKeys(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, benchKey, ids[j], func() (string, error) { return "v", nil })
+				callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, ids[j]))
 			}(j)
 		}
 		wg.Wait()
@@ -123,7 +123,7 @@ func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			go func(j int) {
 				defer wg.Done()
-				callonce.Get(ctx, benchKey, ids[j%100], func() (string, error) { return "v", nil })
+				callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, ids[j%100]))
 			}(j)
 		}
 		wg.Wait()
@@ -133,13 +133,13 @@ func BenchmarkConcurrent_MixedKeys(b *testing.B) {
 // b.RunParallel: cache hit under true parallel reader contention.
 func BenchmarkParallel_CacheHit(b *testing.B) {
 	ctx := callonce.WithCache(context.Background())
-	callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+	callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			callonce.Get(ctx, benchKey, "1", func() (string, error) { return "v", nil })
+			callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(benchKey, "1"))
 		}
 	})
 }

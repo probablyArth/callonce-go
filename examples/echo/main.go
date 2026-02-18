@@ -40,8 +40,8 @@ func main() {
 		id := c.Param("id")
 
 		// Both calls share the same cache, so fetchUser runs once.
-		user1, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
-		user2, _ := callonce.Get(ctx, userKey, id, fetchUser(id))
+		user1, _ := callonce.Get(ctx, fetchUser(id), callonce.L(userKey, id))
+		user2, _ := callonce.Get(ctx, fetchUser(id), callonce.L(userKey, id))
 
 		return c.JSON(http.StatusOK, map[string]any{
 			"first_call":  user1,
