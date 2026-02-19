@@ -81,6 +81,9 @@ func FromContext(ctx context.Context) *Cache
 // lookup returns immediately (OR semantics). On a miss, fn runs once and
 // the result is cached under every lookup key.
 func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T]) (T, error)
+
+// Remove lookups from the cache so subsequent Get calls invoke fn again.
+func Forget[T any](ctx context.Context, lookups ...Lookup[T])
 ```
 
 ## Design decisions
@@ -139,6 +142,18 @@ user, err := callonce.Get(ctx, fetchUser,
 )
 ```
 
+### Manual invalidation with `Forget`
+
+Sometimes you need to invalidate a cached entry mid-request — for example, after a mutation. `Forget` removes specific lookups from the cache so the next `Get` call triggers a fresh fetch.
+
+```go
+// Update the user, then invalidate so the next read sees the change.
+updateUser(ctx, userID, newData)
+callonce.Forget(ctx, callonce.L(userKey, userID))
+```
+
+Like `Get`, `Forget` is a no-op if the context has no cache.
+
 ### Errors are not cached
 
 A failed call doesn't poison the cache. The next caller retries the function, which is the right default for transient errors like network timeouts or database blips.
@@ -165,6 +180,7 @@ If the function panics, the panic propagates to all waiting goroutines (via sing
 | Panics | Propagate to all waiters without poisoning the cache |
 | Type safety | Enforced at compile time via `Key[T]` |
 | Multiple lookups | OR semantics; hit on any key, result stored under all |
+| `Forget` | Removes specific lookups; next `Get` re-invokes `fn` |
 
 ## Benchmarks
 

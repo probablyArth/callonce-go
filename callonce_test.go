@@ -251,6 +251,96 @@ func TestGetDifferentTypes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Forget
+// ---------------------------------------------------------------------------
+
+func TestForgetRemovesKey(t *testing.T) {
+	ctx := callonce.WithCache(context.Background())
+	var calls atomic.Int32
+
+	fn := func() (string, error) {
+		calls.Add(1)
+		return fmt.Sprintf("call-%d", calls.Load()), nil
+	}
+
+	v1, err := callonce.Get(ctx, fn, callonce.L(testKey, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 != "call-1" {
+		t.Fatalf("got %q, want %q", v1, "call-1")
+	}
+
+	callonce.Forget(ctx, callonce.L(testKey, "1"))
+
+	v2, err := callonce.Get(ctx, fn, callonce.L(testKey, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2 != "call-2" {
+		t.Fatalf("got %q, want %q", v2, "call-2")
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("fn called %d times, want 2", n)
+	}
+}
+
+func TestForgetOnlyAffectsSpecifiedKeys(t *testing.T) {
+	ctx := callonce.WithCache(context.Background())
+
+	key := callonce.NewKey[string]("item")
+
+	callonce.Get(ctx, func() (string, error) { return "a-val", nil }, callonce.L(key, "a"))
+	callonce.Get(ctx, func() (string, error) { return "b-val", nil }, callonce.L(key, "b"))
+
+	callonce.Forget(ctx, callonce.L(key, "a"))
+
+	// "b" should still be cached.
+	var bCalls atomic.Int32
+	vb, _ := callonce.Get(ctx, func() (string, error) {
+		bCalls.Add(1)
+		return "b-new", nil
+	}, callonce.L(key, "b"))
+	if vb != "b-val" {
+		t.Fatalf("got %q, want %q", vb, "b-val")
+	}
+	if bCalls.Load() != 0 {
+		t.Fatal("fn for 'b' should not have been called")
+	}
+}
+
+func TestForgetWithoutCache(t *testing.T) {
+	// Should not panic on a context without a cache.
+	callonce.Forget(context.Background(), callonce.L(testKey, "1"))
+}
+
+func TestForgetMultipleKeys(t *testing.T) {
+	ctx := callonce.WithCache(context.Background())
+	key := callonce.NewKey[string]("item")
+
+	callonce.Get(ctx, func() (string, error) { return "a", nil }, callonce.L(key, "a"))
+	callonce.Get(ctx, func() (string, error) { return "b", nil }, callonce.L(key, "b"))
+	callonce.Get(ctx, func() (string, error) { return "c", nil }, callonce.L(key, "c"))
+
+	callonce.Forget(ctx, callonce.L(key, "a"), callonce.L(key, "b"))
+
+	var calls atomic.Int32
+	va, _ := callonce.Get(ctx, func() (string, error) { calls.Add(1); return "a2", nil }, callonce.L(key, "a"))
+	vb, _ := callonce.Get(ctx, func() (string, error) { calls.Add(1); return "b2", nil }, callonce.L(key, "b"))
+	vc, _ := callonce.Get(ctx, func() (string, error) { calls.Add(1); return "c2", nil }, callonce.L(key, "c"))
+
+	if va != "a2" || vb != "b2" {
+		t.Fatalf("forgotten keys should return new values, got %q %q", va, vb)
+	}
+	if vc != "c" {
+		t.Fatalf("unforgotten key should return cached value, got %q", vc)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("fn called %d times, want 2", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // OR semantics: multiple lookups per Get call.
 // ---------------------------------------------------------------------------
 

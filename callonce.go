@@ -55,6 +55,21 @@ func FromContext(ctx context.Context) *Cache {
 	return c
 }
 
+// Forget removes the given lookups from the cache so that subsequent
+// calls to Get will invoke fn again. It is a no-op if ctx has no Cache.
+func Forget[T any](ctx context.Context, lookups ...Lookup[T]) {
+	c := FromContext(ctx)
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	for _, l := range lookups {
+		delete(c.store, l.Key.name+":"+l.Identifier)
+	}
+	c.mu.Unlock()
+}
+
 // Get returns the value for the given lookups, calling fn at most once per
 // cache. When multiple lookups are provided, a cache hit on any one of them
 // returns immediately (OR semantics). On a cache miss fn is called once and
