@@ -22,12 +22,26 @@ func fetchUser(id string) func() (string, error) {
 	}
 }
 
+// logger implements callonce.Observer and logs every cache event.
+type logger struct{}
+
+func (l *logger) On(e callonce.EventData) {
+	switch e.Event {
+	case callonce.EventHit:
+		log.Printf("[callonce] HIT   key=%s id=%s", e.Key, e.Identifier)
+	case callonce.EventMiss:
+		log.Printf("[callonce] MISS  key=%s id=%s", e.Key, e.Identifier)
+	case callonce.EventDedup:
+		log.Printf("[callonce] DEDUP key=%s id=%s", e.Key, e.Identifier)
+	}
+}
+
 func main() {
 	app := fiber.New()
 
-	// Middleware: attach a callonce cache to every request.
+	// Middleware: attach a callonce cache with observer to every request.
 	app.Use(func(c *fiber.Ctx) error {
-		ctx := callonce.WithCache(c.UserContext())
+		ctx := callonce.WithCache(c.UserContext(), callonce.WithObserver(&logger{}))
 		c.SetUserContext(ctx)
 		return c.Next()
 	})

@@ -72,7 +72,7 @@ func NewKey[T any](name string) Key[T]
 func L[T any](key Key[T], identifier string) Lookup[T]
 
 // Attach a new cache to a context (typically once per request).
-func WithCache(ctx context.Context) context.Context
+func WithCache(ctx context.Context, opts ...Option) context.Context
 
 // Retrieve the cache from a context (nil if none).
 func FromContext(ctx context.Context) *Cache
@@ -84,6 +84,9 @@ func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T])
 
 // Remove lookups from the cache so subsequent Get calls invoke fn again.
 func Forget[T any](ctx context.Context, lookups ...Lookup[T])
+
+// Attach an observer to receive hit, miss, and dedup events.
+func WithObserver(o Observer) Option
 ```
 
 ## Design decisions
@@ -154,6 +157,44 @@ callonce.Forget(ctx, callonce.L(userKey, userID))
 
 Like `Get`, `Forget` is a no-op if the context has no cache.
 
+### Observability with `Observer`
+
+Attach an `Observer` to receive structured events on every cache interaction:
+
+```go
+type Observer interface {
+    On(eventData EventData)
+}
+```
+
+Three event types are emitted:
+- `EventHit` — a cached value was returned
+- `EventMiss` — no cache entry existed, `fn` was called
+- `EventDedup` — a concurrent caller shared an in-flight singleflight result
+
+Each event carries the key name and identifier, so you can log, count, or push metrics however you like:
+
+```go
+type metricsObserver struct{}
+
+func (m *metricsObserver) On(e callonce.EventData) {
+    switch e.Event {
+    case callonce.EventHit:
+        hitCounter.WithLabelValues(e.Key).Inc()
+    case callonce.EventMiss:
+        missCounter.WithLabelValues(e.Key).Inc()
+    case callonce.EventDedup:
+        dedupCounter.WithLabelValues(e.Key).Inc()
+    }
+}
+
+ctx := callonce.WithCache(r.Context(), callonce.WithObserver(&metricsObserver{}))
+```
+
+The observer is optional. When nil, no events are dispatched and there is zero overhead.
+
+**Important:** `On` is called synchronously on the hot path — it blocks `Get` until it returns. Keep your observer fast (atomic increments, channel sends, etc.). Avoid blocking I/O like HTTP calls or disk writes inside `On`; push to a background worker instead.
+
 ### Errors are not cached
 
 A failed call doesn't poison the cache. The next caller retries the function, which is the right default for transient errors like network timeouts or database blips.
@@ -181,29 +222,30 @@ If the function panics, the panic propagates to all waiting goroutines (via sing
 | Type safety | Enforced at compile time via `Key[T]` |
 | Multiple lookups | OR semantics; hit on any key, result stored under all |
 | `Forget` | Removes specific lookups; next `Get` re-invokes `fn` |
+| `Observer` | Optional; receives `EventHit`, `EventMiss`, `EventDedup` with key + identifier |
 
 ## Benchmarks
 
-> Apple M4 Pro · Go 1.25 · `go test -bench=. -benchmem -count=10` analyzed with [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
+> Apple M4 Pro · Go 1.25 · `go test -bench=. -benchmem -count=10`
 
 ### Per-call latency
 
 | Scenario | ns/op | B/op | allocs/op |
 |----------|------:|-----:|----------:|
-| Cache hit | **26.11** ± 1% | 16 | 1 |
-| Cache miss (first call) | 358.8 ± 10% | 254 | 4 |
-| No cache in context | 2.53 ± 1% | 0 | 0 |
-| Error (not cached) | 82.36 ± 1% | 96 | 2 |
+| Cache hit | **19.55** ± 2% | 0 | 0 |
+| Cache miss (first call) | 389.4 ± 5% | 268 | 5 |
+| No cache in context | 2.54 ± 1% | 0 | 0 |
+| Error (not cached) | 105.6 ± 4% | 96 | 2 |
 
-Cache hits resolve in **~26 ns** with a single allocation (the key concatenation). The no-cache fallback path adds only ~2.5 ns.
+Cache hits resolve in **~20 ns** with zero allocations. The no-cache fallback path adds only ~2.5 ns.
 
 ### Concurrent throughput (1,000 goroutines)
 
 | Scenario | µs/op | B/op | allocs/op |
 |----------|------:|-----:|----------:|
-| Same key (max dedup) | **262** ± 7% | 49 k | 2,010 |
-| Mixed keys (100 keys) | 882 ± 7% | 133 k | 3,370 |
-| Unique keys (no dedup) | 1,986 ± 1% | 483 k | 6,197 |
+| Same key (max dedup) | **284** ± 28% | 33 k | 1,013 |
+| Mixed keys (100 keys) | 930 ± 2% | 136 k | 3,369 |
+| Unique keys (no dedup) | 2,109 ± 2% | 509 k | 7,182 |
 
 ### callonce vs raw singleflight
 
@@ -211,9 +253,9 @@ Same 1,000-goroutine scenarios. Singleflight deduplicates in-flight calls but **
 
 | Scenario | callonce | singleflight | speedup |
 |----------|------:|------:|:------:|
-| Same key | 262 µs | 633 µs | **2.4x** |
-| Mixed keys | 882 µs | 635 µs | 0.7x |
-| Unique keys | 1,986 µs | 606 µs | 0.3x |
+| Same key | 284 µs | 658 µs | **2.3x** |
+| Mixed keys | 930 µs | 643 µs | 0.7x |
+| Unique keys | 2,109 µs | 630 µs | 0.3x |
 
 callonce shines when keys repeat. The cache eliminates redundant `Do()` calls entirely. With mostly-unique keys the caching overhead (map writes, locks) costs more than it saves; in that scenario raw singleflight is leaner.
 

@@ -2,51 +2,19 @@ package callonce
 
 import (
 	"context"
-	"fmt"
-	"sync"
-
-	"golang.org/x/sync/singleflight"
 )
 
 type contextKey struct{}
 
-// Key represents a strongly-typed cache key.
-// The type parameter T is encoded into the underlying key string,
-// so different types with the same name will not collide.
-type Key[T any] struct {
-	name string
-}
-
-// NewKey creates a new typed cache key.
-func NewKey[T any](name string) Key[T] {
-	var zero T
-	return Key[T]{name: fmt.Sprintf("%T:%s", zero, name)}
-}
-
-// Lookup pairs a Key with an identifier for cache lookups.
-type Lookup[T any] struct {
-	Key        Key[T]
-	Identifier string
-}
-
-// L creates a Lookup pairing a key with an identifier.
-func L[T any](key Key[T], identifier string) Lookup[T] {
-	return Lookup[T]{Key: key, Identifier: identifier}
-}
-
-// Cache holds request-scoped memoized results.
-// Create one per request via WithCache and retrieve it via FromContext.
-type Cache struct {
-	group singleflight.Group
-	mu    sync.RWMutex
-	store map[string]any
-}
-
 // WithCache returns a child context that carries a new Cache.
-func WithCache(ctx context.Context) context.Context {
-	return context.WithValue(ctx, contextKey{}, &Cache{
+func WithCache(ctx context.Context, opts ...Option) context.Context {
+	cache := &Cache{
 		store: make(map[string]any),
-	})
+	}
+	for _, opt := range opts {
+		opt(cache)
+	}
+	return context.WithValue(ctx, contextKey{}, cache)
 }
 
 // FromContext retrieves the Cache from ctx, or nil if none is present.
@@ -65,7 +33,7 @@ func Forget[T any](ctx context.Context, lookups ...Lookup[T]) {
 
 	c.mu.Lock()
 	for _, l := range lookups {
-		delete(c.store, l.Key.name+":"+l.Identifier)
+		delete(c.store, l.getFullKey())
 	}
 	c.mu.Unlock()
 }
@@ -78,28 +46,25 @@ func Forget[T any](ctx context.Context, lookups ...Lookup[T]) {
 //
 // If ctx has no Cache (WithCache was not called), fn is called directly.
 func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T]) (T, error) {
+	if len(lookups) == 0 {
+		return fn()
+	}
+
 	c := FromContext(ctx)
 	if c == nil {
 		return fn()
 	}
 
-	// Build cache key strings.
-	cacheKeys := make([]string, len(lookups))
-	for i, l := range lookups {
-		cacheKeys[i] = l.Key.name + ":" + l.Identifier
-	}
-
 	// Fast path: check if any key is already cached.
 	c.mu.RLock()
-	for _, k := range cacheKeys {
-		if v, ok := c.store[k]; ok {
+	for _, lookup := range lookups {
+		if v, ok := c.store[lookup.getFullKey()]; ok {
 			c.mu.RUnlock()
-			// Backfill all other keys so future lookups by any
-			// identifier also hit cache.
-			if len(cacheKeys) > 1 {
+			c.emit(EventHit, lookup.Key.name, lookup.Identifier)
+			if len(lookups) > 1 {
 				c.mu.Lock()
-				for _, k2 := range cacheKeys {
-					c.store[k2] = v
+				for _, l2 := range lookups {
+					c.store[l2.getFullKey()] = v
 				}
 				c.mu.Unlock()
 			}
@@ -109,17 +74,19 @@ func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T])
 	c.mu.RUnlock()
 
 	// Slow path: singleflight dedup on the first key.
-	val, err, _ := c.group.Do(cacheKeys[0], func() (any, error) {
+	val, err, shared := c.group.Do(lookups[0].Key.name+delimiter+lookups[0].Identifier, func() (any, error) {
 		// Double-check: another goroutine may have cached while we waited.
 		c.mu.RLock()
-		for _, k := range cacheKeys {
-			if v, ok := c.store[k]; ok {
+		for _, l := range lookups {
+			if v, ok := c.store[l.getFullKey()]; ok {
 				c.mu.RUnlock()
+				c.emit(EventHit, l.Key.name, l.Identifier)
 				return v, nil
 			}
 		}
 		c.mu.RUnlock()
 
+		c.emit(EventMiss, lookups[0].Key.name, lookups[0].Identifier)
 		result, err := fn()
 		if err != nil {
 			return result, err
@@ -127,13 +94,18 @@ func Get[T any](ctx context.Context, fn func() (T, error), lookups ...Lookup[T])
 
 		// Store under ALL keys.
 		c.mu.Lock()
-		for _, k := range cacheKeys {
-			c.store[k] = result
+		for _, l := range lookups {
+			c.store[l.getFullKey()] = result
 		}
 		c.mu.Unlock()
 
 		return result, nil
 	})
+
+	// Shared callers piggyback on the in-flight result.
+	if shared {
+		c.emit(EventDedup, lookups[0].Key.name, lookups[0].Identifier)
+	}
 
 	if err != nil {
 		var zero T

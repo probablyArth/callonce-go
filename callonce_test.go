@@ -27,6 +27,25 @@ func TestGetWithoutCache(t *testing.T) {
 	}
 }
 
+func TestGetZeroLookups(t *testing.T) {
+	ctx := callonce.WithCache(context.Background())
+	var calls atomic.Int32
+
+	v1, err := callonce.Get(ctx, func() (string, error) {
+		calls.Add(1)
+		return "no-lookups", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 != "no-lookups" {
+		t.Fatalf("got %q, want %q", v1, "no-lookups")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fn called %d times, want 1", n)
+	}
+}
+
 func TestGetCachesResult(t *testing.T) {
 	ctx := callonce.WithCache(context.Background())
 	var calls atomic.Int32
@@ -247,6 +266,97 @@ func TestGetDifferentTypes(t *testing.T) {
 	}
 	if vi != 42 {
 		t.Fatalf("got %d, want %d", vi, 42)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Observer
+// ---------------------------------------------------------------------------
+
+type testObserver struct {
+	hits   atomic.Int32
+	misses atomic.Int32
+	dedups atomic.Int32
+	events []callonce.EventData
+}
+
+func (o *testObserver) On(e callonce.EventData) {
+	o.events = append(o.events, e)
+	switch e.Event {
+	case callonce.EventHit:
+		o.hits.Add(1)
+	case callonce.EventMiss:
+		o.misses.Add(1)
+	case callonce.EventDedup:
+		o.dedups.Add(1)
+	}
+}
+
+func TestObserverHitAndMiss(t *testing.T) {
+	obs := &testObserver{}
+	ctx := callonce.WithCache(context.Background(), callonce.WithObserver(obs))
+	key := callonce.NewKey[string]("hooks")
+
+	// Miss: first call.
+	callonce.Get(ctx, func() (string, error) { return "a", nil }, callonce.L(key, "1"))
+	// Hit: same key.
+	callonce.Get(ctx, func() (string, error) { return "a", nil }, callonce.L(key, "1"))
+	// Miss: new key.
+	callonce.Get(ctx, func() (string, error) { return "b", nil }, callonce.L(key, "2"))
+	// Hit: cached key.
+	callonce.Get(ctx, func() (string, error) { return "b", nil }, callonce.L(key, "2"))
+	// Hit: cached key.
+	callonce.Get(ctx, func() (string, error) { return "a", nil }, callonce.L(key, "1"))
+
+	if h := obs.hits.Load(); h != 3 {
+		t.Fatalf("hits = %d, want 3", h)
+	}
+	if m := obs.misses.Load(); m != 2 {
+		t.Fatalf("misses = %d, want 2", m)
+	}
+}
+
+func TestObserverReceivesKey(t *testing.T) {
+	obs := &testObserver{}
+	ctx := callonce.WithCache(context.Background(), callonce.WithObserver(obs))
+	key := callonce.NewKey[string]("item")
+
+	callonce.Get(ctx, func() (string, error) { return "v", nil }, callonce.L(key, "42"))
+
+	if len(obs.events) != 1 {
+		t.Fatalf("got %d events, want 1", len(obs.events))
+	}
+	if obs.events[0].Identifier != "42" {
+		t.Fatalf("identifier = %q, want %q", obs.events[0].Identifier, "42")
+	}
+}
+
+func TestObserverErrorCountsAsMiss(t *testing.T) {
+	obs := &testObserver{}
+	ctx := callonce.WithCache(context.Background(), callonce.WithObserver(obs))
+	key := callonce.NewKey[string]("hooks-err")
+
+	callonce.Get(ctx, func() (string, error) { return "", errors.New("fail") }, callonce.L(key, "1"))
+
+	if m := obs.misses.Load(); m != 1 {
+		t.Fatalf("misses = %d, want 1", m)
+	}
+	if h := obs.hits.Load(); h != 0 {
+		t.Fatalf("hits = %d, want 0", h)
+	}
+}
+
+func TestObserverNilIsNoop(t *testing.T) {
+	// No observer — should not panic.
+	ctx := callonce.WithCache(context.Background())
+	key := callonce.NewKey[string]("no-obs")
+
+	v, err := callonce.Get(ctx, func() (string, error) { return "ok", nil }, callonce.L(key, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != "ok" {
+		t.Fatalf("got %q, want %q", v, "ok")
 	}
 }
 

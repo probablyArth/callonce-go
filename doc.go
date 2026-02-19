@@ -12,7 +12,7 @@
 //	var userKey = callonce.NewKey[*User]("user")
 //
 //	ctx := callonce.WithCache(r.Context())
-//	user, err := callonce.Get(ctx, userKey, userID, fetchUser)
+//	user, err := callonce.Get(ctx, fetchUser, callonce.L(userKey, userID))
 //
 // Concurrent callers for the same key and identifier share a single in-flight
 // call. Successful results are cached for the lifetime of the context.
